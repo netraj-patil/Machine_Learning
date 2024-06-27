@@ -1,11 +1,13 @@
+import datasets
 from datasets import load_dataset
 import os
-import ast
-from pathlib import Path
+# from pathlib import Path
 from PIL import Image
-import pandas as pd
+import json
 
-load_dataset('/mnt/e/Machine_Learning/dataset/SROIE2019')
+# print('step 1')
+# load_dataset('/mnt/e/Machine_Learning/dataset/SROIE2019')
+# print('step 2')
 
 _CITATION = """\
 @article{,
@@ -49,11 +51,11 @@ class DataExtraction(datasets.GeneratorBasedBuilder):
             description=_DESCRIPTION,
             features=datasets.Features(
                {
-                   "id": datasets.Value(dtype='string', id=None),
+                   "id": datasets.Value(dtype='int32', id=None),
                    
-                   "tokens": datasets.Sequence(feature=Value(dtype='string', id=None), length=-1, id=None),
-                   "bboxes": datasets.Sequence(feature=Sequence(feature=Value(dtype='int64', id=None), length=-1, id=None), length=-1, id=None),
-                   "ner_tags": Sequence(feature=ClassLabel(names=['O', 'I-company','B-company', 'I-date','B-date', 'I-address', 'B-address', 'I-total', 'B-total'], id=None), length=-1, id=None),
+                   "tokens": datasets.Sequence(feature=datasets.Value(dtype='string', id=None), length=-1, id=None),
+                   "bboxes": datasets.Sequence(feature=datasets.Sequence(feature=datasets.Value(dtype='int64', id=None), length=-1, id=None), length=-1, id=None),
+                   "ner_tags": datasets.Sequence(feature=datasets.ClassLabel(names=['O', 'company', 'date', 'address', 'total'], id=None), length=-1, id=None),
                    "image": datasets.Image(mode=None, decode=True, id=None),
                }
             ),
@@ -62,7 +64,7 @@ class DataExtraction(datasets.GeneratorBasedBuilder):
             citation=_CITATION,
         )
     
-    def _split_generators(self, dl_manager):
+    def _split_generators(self,abc):
         """Returns SplitGenerators."""
         """Uses local files located with data_dir"""
         train_dir = {
@@ -78,7 +80,7 @@ class DataExtraction(datasets.GeneratorBasedBuilder):
 
         return [
             datasets.SplitGenerator(
-                name=datasets.Split.TRAIN,
+                name='train',
                 gen_kwargs={
                     "image_dir": train_dir["image"],
                     "box_dir": train_dir["box"],
@@ -86,7 +88,7 @@ class DataExtraction(datasets.GeneratorBasedBuilder):
                 }
             ),
             datasets.SplitGenerator(
-                name=datasets.Split.TEST,
+                name='test',
                 gen_kwargs={
                     "image_dir": test_dir["image"],
                     "box_dir": test_dir["box"],
@@ -96,20 +98,57 @@ class DataExtraction(datasets.GeneratorBasedBuilder):
         ]
     
     def _generate_examples(self, image_dir, box_dir, entities_dir):
+        
         image_files = os.listdir(image_dir)
-        for image_file in image_files:
+        for id,image_file in enumerate(image_files):
+            
             image_path = os.path.join(image_dir, image_file)
-            box_path = os.path.join(box_dir, image_file.replace('.jpg', '.box'))  # Adjust extension as needed
-            entities_path = os.path.join(entities_dir, image_file.replace('.jpg', '.entities'))  # Adjust extension as needed
+            box_path = os.path.join(box_dir, image_file.replace('.jpg', '.txt'))  # Adjust extension as needed
+            entities_path = os.path.join(entities_dir, image_file.replace('.jpg', '.txt'))  # Adjust extension as needed
+            
+            # Open the text file
+            with open(entities_path, "r",encoding="utf-8", errors="ignore") as file:
+              # Read the entire content
+              data = file.read()
+            # Parse the JSON data
+            data_dict = json.loads(data)
+            data_list = []
+            bbox_list = []
+            ner_tags_list = []
+            with open(box_path, "r", encoding="utf-8", errors="ignore") as file:
+                for line in file:
+                    if line == '':
+                        continue
+                    # Split the line by comma
+                    split_line = line.strip().split(",")
 
-            yield {
-                "id": datasets.Value(dtype='string', id=None),
-                "tokens": datasets.Sequence(feature=Value(dtype='string', id=None), length=-1, id=None),
-                "bboxes": datasets.Sequence(feature=Sequence(feature=Value(dtype='int64', id=None), length=-1, id=None), length=-1, id=None),
-                "ner_tags": Sequence(feature=ClassLabel(names=['O', 'I-company','B-company', 'I-date','B-date', 'I-address', 'B-address', 'I-total', 'B-total'], id=None), length=-1, id=None),
-                "image": datasets.Image(mode=None, decode=True, id=None),
-                
-                # "image": image_path,
-                # "box": box_path,
-                # "entities": entities_path,
+                    # Extract first 8 numbers and convert to integers
+                    try:
+                        numbers = [int(num) for num in split_line[:8] if num.strip()]
+                    except Exception('ValueError'):
+                        continue
+                    
+                    del(numbers[2:4])
+                    del(numbers[-2:])
+                    
+                    # Get the name as a string (everything after the 8th element)
+                    text = ", ".join(split_line[8:])
+                    
+                    for ner_tag, key in enumerate(data_dict,1):
+                        if data_dict[key] == text.strip():
+                            ner_tags_list.append(ner_tag)
+                        else:
+                            ner_tags_list.append(0)
+                    
+                    # Append data to respective lists
+                    bbox_list.append(numbers)
+                    data_list.append(text)
+
+            image, dim = load_image(image_path)
+            yield id, {
+                "id": id,
+                "tokens": data_list,
+                "bboxes": bbox_list,
+                "ner_tags": ner_tags_list,
+                "image": image,
             }
